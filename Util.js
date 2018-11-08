@@ -56,17 +56,36 @@ class Util {
     static processMetadataFjords(meta) { // TODO-FJORDS move code tagged TODO-FJORDS to this routine where possible
         // The Archive is nothing but edge cases, handle some of them here so the code doesnt have to !
         // Note this called by ArchiveMember and ArchiveItem and will probably be called by ArchiveFiles so keep it generic and put class-specifics in Archive*.processMetadataFjords
-        Object.keys(Util.metadata.arrays).forEach(f => { // Turn these into array, no matter what parsed JSON contains
-            meta[f] = (Array.isArray(meta[f]) ? meta[f] : (typeof(meta[f]) === 'string' ? [meta[f]] : [])); // [str*]
-        });
-        Object.keys(Util.metadata.singletons).forEach(f => {
-            if (typeof meta[f] === "undefined") meta[f] = "";
-            if (Array.isArray(meta[f])) {
-                meta[f] = meta[f].join(Util.metadata.singletons[f]); //e.g. biographyofbanan0000eage
-                debug("Metadata Fjords - concatenting multi-line description on %s", meta.identifier);
+        const res = {};
+        Object.keys(meta).forEach(f => {
+            if (Util.metadata.arrays.includes(f)) {
+                res[f] = (Array.isArray(meta[f]) ? meta[f] : (typeof(meta[f]) === 'string' ? [meta[f]] : [])); // [str*]
+            } else {
+                if (Array.isArray(meta[f])) {
+                    if (meta[f].length > 1) { //TODO-IAJS TODO-FJORDS change this to use the rules in item_rules.js
+                        if (f in Util.metadata.singletons) { // We can concatenate them
+                            debug("Metadata Fjords - concatenting multi-line %s on %s", f, meta.identifier);
+                            res[f] = meta[f].join(Util.metadata.singletons[f]); //e.g. biographyofbanan0000eage
+                        } else {
+                            debug("WARNING: Metadata Fjords - cannot concatenate multi-line %s on %s, choosing first", f, meta.identifier);
+                            res[f] = meta[f][0];
+                        }
+                    } else if (meta[f].length > 0) {
+                        res[f] = meta[f][0];
+                    } else {
+                        res[f] = "";     // Old standard would have it undefined if not in singletons else "" - can do that if we test for undefined anywhere
+                    }
+                } else {
+                    // Already converted to string and want a string
+                    res[f] = meta[f];
+                }
             }
         });
-        return meta;
+        Object.keys(Util.metadata.singletons)
+            .forEach(f => { if (typeof res[f] === "undefined") res[f] = ""; })
+        Util.metadata.arrays
+            .forEach(f => { if (typeof res[f] === "undefined") res[f] = []; })
+        return res;
     }
 }
 
@@ -985,6 +1004,7 @@ Util.languageMapping = {
     'zxx': 'No linguistic content'
 };
 
+//TODO migrate to use Arthurs rules from item_rules.json and then confirm in dweb-archive it follows them.
 Util.metadata = {
     "singletons": {    // Fields that should be single entry but are occasionally multi - so concatenate
         "description": "<br/>"

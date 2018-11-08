@@ -2,7 +2,6 @@ const canonicaljson = require('@stratumn/canonicaljson');
 const ArchiveFile = require("./ArchiveFile");
 const ArchiveMember = require("./ArchiveMember");
 const Util = require("./Util");
-const IAJSItem = require("iajs").Item;
 
 //require('babel-core/register')({ presets: ['env', 'react']}); // ES6 JS below!
 const debug = require('debug')('dweb-archive');
@@ -10,7 +9,7 @@ const debug = require('debug')('dweb-archive');
 //const DwebObjects = require('@internetarchive/dweb-objects'); //Not "required" because available as window.DwebObjects by separate import
 //TODO-NAMING url could be a name
 
-class ArchiveItem extends IAJSItem {
+class ArchiveItem {
     /*
     Base class representing an Item and/or a Search query (A Collection is both).
     This is just storage, the UI is in ArchiveBase and subclasses, theoretically this class could be used for a server or gateway app with no UI.
@@ -27,9 +26,7 @@ class ArchiveItem extends IAJSItem {
 
 
     constructor({itemid = undefined, metaapi = undefined}={}) {
-        const rawmeta = metaapi ? new RawMetadataAPIResponse(metaapi) : undefined;
-        super(itemid, rawmeta); //TODO-IAJS should really be a RawMetaDataAPI
-        this.itemid = itemid;   //TODO-IAJS stores this as this.identifier, can merge
+        this.itemid = itemid;
         this.loadFromMetadataAPI(metaapi);
     }
 
@@ -53,7 +50,7 @@ class ArchiveItem extends IAJSItem {
         meta:   { metadata, files, reviews, members, and other stuff }
          */
         if (metaapi) {
-            const meta = Util.processMetadataFjords(metaapi.metadata); // Just processes the .metadata part
+            let meta = Util.processMetadataFjords(metaapi.metadata); // Just processes the .metadata part
             this.files = (metaapi && metaapi.files)
                 ? metaapi.files.map((f) => new ArchiveFile({itemid: this.itemid, metadata: f}))
                 : [];   // Default to empty, so usage simpler.
@@ -74,8 +71,7 @@ class ArchiveItem extends IAJSItem {
             this.collection_titles = metaapi.collection_titles;
             this.collection_sort_order = metaapi.collection_sort_order;
         }
-        //return metaapi;// Broken but unused
-        return undefined;
+        return metaapi; // Unused and broken now that we made a copy of it
     }
 
 
@@ -125,9 +121,8 @@ class ArchiveItem extends IAJSItem {
          */
         debug('getting metadata for %s', this.itemid);
         // Fetch via Domain record - the dweb:/arc/archive.org/metadata resolves into a table that is dynamic on gateway.dweb.me
-        // Fetch using Transports as its multiurl and might not be HTTP urls
-        /* ORIGINAL
         const name = `dweb:/arc/archive.org/metadata/${this.itemid}`;
+        // Fetch using Transports as its multiurl and might not be HTTP urls
         const prom = DwebTransports.p_rawfetch([name], {timeoutMS: 5000})    //TransportError if all urls fail (e.g. bad itemid)
             .then((m) => {
                 // noinspection ES6ModulesDependencies
@@ -137,15 +132,6 @@ class ArchiveItem extends IAJSItem {
                 debug("metadata for %s fetched successfully", this.itemid);
                 cb(null, this);
             }).catch(err => cb(err));
-        */
-        const prom = this.getMetadata()
-        .then(rawmetadataapiresponse => {
-            console.assert(rawmetadataapiresponse.data.metadata.identifier[0] === this.itemid);
-            this.loadFromMetadataAPI(rawmetadataapiresponse.data); // Loads .item .files .reviews and some other fields
-            debug("metadata for %s fetched successfully", this.itemid);
-            cb(null, this); })
-        .catch(err => cb(err));
-
     }
 
     fetch_query(opts={}, cb) { // opts = {wantFullResp=false}
