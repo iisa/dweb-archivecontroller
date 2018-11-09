@@ -5,8 +5,7 @@ Purpose to prove different levels of getting metadata
  TODO - stepwise integration
     * MetaDataService.get(commute) DONE
     * integrate into ArchiveItem DONE
-    * Make IAJS use proxy, transports etc
-      * Make it conditional on DwebTransports
+    * Make IAJS use proxy, transports etc, conditional on DwebTransport DONE
     * Do contract enforcement
       * Make AI & AIC use [description] and make that an array, not singleton
       * Make process use the list from Arthur
@@ -25,10 +24,8 @@ TODO discuss
     * Would be nice not to bury stuff so deep e.g. IAJSItem.metadataCache.data.metadata  cf ArchiveItem.metadata
  */
 
-process.env.DEBUG="dweb-archive:sandbox"; //iajs:* dweb-mirror:* parallel-streams:* dweb-transports dweb-transports:* dweb-objects dweb-objects:* dweb-archive dweb-archive:*";
+process.env.DEBUG="dweb-archive:sandbox dweb-transports dweb-transports:*"; //iajs:* dweb-mirror:* parallel-streams:* dweb-transports dweb-transports:* dweb-objects dweb-objects:* dweb-archive dweb-archive:*";
 const debug = require('debug')("dweb-archive:sandbox");
-global.DwebTransports = require('@internetarchive/dweb-transports'); // Needed by IAUX
-global.DwebObjects = require('@internetarchive/dweb-objects'); //Includes initializing support for names // Needed by IAUX
 
 const itemid = "commute";
 
@@ -50,7 +47,6 @@ async function start() {
 }
 async function test_dwebPREIAJS() {
     try {
-        await start();
         const ai = new ArchiveItemPreIAJS({itemid});
         await ai.fetch_metadata();
         debug("Test of Dweb API PREIAJS complete %o", ai.metadata.description);
@@ -62,7 +58,6 @@ async function test_dwebPREIAJS() {
 
 async function test_dweb() {
     try {
-        await start();
         const ai = new ArchiveItem({itemid});
         await ai.fetch_metadata();
         debug("Test of Dweb API complete %o", ai.metadata.description);
@@ -98,11 +93,10 @@ async function test_iajs_c1() {
     try {
         const iajsItem = new Item(itemid);
         const desc = await iajsItem.getMetadataField("description"); // YUCK - need async on every field access just in case not fetched
-        //debug("IAJS_C1 Description= %o", desc);
+        debug("IAJS_C1 Description= %o", desc);
     } catch (err) {
         debug("IAJS_C1 FAIL err = %O", err);
     }
-    console.log("FOO")
     return undefined;
 }
 // ========== Example test using IAJS new library at Controller level WITH PRELOAD - CURRENTLY WORKS ==========
@@ -122,8 +116,17 @@ async function test_iajs_c2() {
 // ===================
 
 async function test() {
+    // Without DwebTransports
     await test_dweb();        // WORKS
+    await test_iajs();        // FAILING
+    await test_iajs_c1();     // WORKS
+    await test_iajs_c2();     // WORKS
+
+    global.DwebTransports = require('@internetarchive/dweb-transports'); // Needed by IAUX
+    global.DwebObjects = require('@internetarchive/dweb-objects'); //Includes initializing support for names // Needed by IAUX
+    await start();
     await test_dwebPREIAJS(); // WORKS
+    await test_dweb();        // WORKS
     await test_iajs();        // FAILING
     await test_iajs_c1();     // WORKS
     await test_iajs_c2();     // WORKS
