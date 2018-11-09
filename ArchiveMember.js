@@ -17,7 +17,7 @@ class ArchiveMember {
     }
 
     static processMetadataFjords(meta) {
-        return Util.processMetadataFjords(meta);
+        return Util.enforceStringOrArray(meta);  // TODO-IAJS this is probably wrong now, will use wrong set of rules
     }
 
     thumbnailFile() {

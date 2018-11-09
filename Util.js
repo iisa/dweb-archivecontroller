@@ -1,5 +1,6 @@
 //require('babel-core/register')({presets: ['env', 'react']}); // ES6 JS below!
 const debug = require('debug')('dweb-archive');
+const item_rules = require('./item_rules.js');
 //TODO-REFACTOR-REPO - remove excess crud from here, then remove stuff here from dweb-archive and include this Util
 class Util {
 
@@ -53,26 +54,21 @@ class Util {
         return (typeof DwebArchive !== "undefined") && DwebArchive.mirror || "https://dweb.me";
     }
 
-    static processMetadataFjords(meta) { // TODO-FJORDS move code tagged TODO-FJORDS to this routine where possible
+    static enforceStringOrArray(meta) { // TODO-FJORDS move code tagged TODO-FJORDS to this routine where possible
         // The Archive is nothing but edge cases, handle some of them here so the code doesnt have to !
-        // Note this called by ArchiveMember and ArchiveItem and will probably be called by ArchiveFiles so keep it generic and put class-specifics in Archive*.processMetadataFjords
+        // Note this called by ArchiveMember and ArchiveItem and will probably be called by ArchiveFiles so keep it generic and put class-specifics in Archive*.processMetadataFjord
         const res = {};
         Object.keys(meta).forEach(f => {
-            if (Util.metadata.arrays.includes(f)) {
+            if (item_rules.repeatable_fields.includes(f)) {
                 res[f] = (Array.isArray(meta[f]) ? meta[f] : (typeof(meta[f]) === 'string' ? [meta[f]] : [])); // [str*]
             } else {
                 if (Array.isArray(meta[f])) {
                     if (meta[f].length > 1) { //TODO-IAJS TODO-FJORDS change this to use the rules in item_rules.js
-                        if (f in Util.metadata.singletons) { // We can concatenate them
-                            debug("Metadata Fjords - concatenting multi-line %s on %s", f, meta.identifier);
-                            res[f] = meta[f].join(Util.metadata.singletons[f]); //e.g. biographyofbanan0000eage
-                        } else {
-                            debug("WARNING: Metadata Fjords - cannot concatenate multi-line %s on %s, choosing first", f, meta.identifier);
-                            res[f] = meta[f][0];
-                        }
+                        debug("WARNING: Metadata Fjords - multi item in non-repeating field %s on %s, choosing first", f, meta.identifier);
+                        res[f] = meta[f][0];
                     } else if (meta[f].length > 0) {
                         res[f] = meta[f][0];
-                    } else {
+                    } else { // Empty array
                         res[f] = "";     // Old standard would have it undefined if not in singletons else "" - can do that if we test for undefined anywhere
                     }
                 } else {
@@ -81,10 +77,10 @@ class Util {
                 }
             }
         });
-        Object.keys(Util.metadata.singletons)
-            .forEach(f => { if (typeof res[f] === "undefined") res[f] = ""; })
-        Util.metadata.arrays
-            .forEach(f => { if (typeof res[f] === "undefined") res[f] = []; })
+        Object.keys(item_rules.required_fields).filter(f=>((typeof res[f] === "undefined") && !item_rules.repeatable_fields.includes(f)))
+            .forEach(f => {debug("WARNING: Metadata Fjords - field %f missing from %s", f, meta.identifier); res[f] = ""; });
+        item_rules.repeatable_fields.filter(f=>(typeof res[f] === "undefined") )
+            .forEach(f => res[f] = [] )
         return res;
     }
 }
@@ -1007,9 +1003,9 @@ Util.languageMapping = {
 //TODO migrate to use Arthurs rules from item_rules.json and then confirm in dweb-archive it follows them.
 Util.metadata = {
     "singletons": {    // Fields that should be single entry but are occasionally multi - so concatenate
-        "description": "<br/>"
+        //"description": "<br/>" // Now assumes array
     },
-    "arrays": ["collection", "updatedate", "updater" ]
+    "arrays": ["collection", "creator", "description", "language", "updatedate", "updater" ]
     // All other fields should be checked and enforced as single entry
 };
 

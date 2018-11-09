@@ -50,7 +50,7 @@ class ArchiveItem {
         meta:   { metadata, files, reviews, members, and other stuff }
          */
         if (metaapi) {
-            let meta = Util.processMetadataFjords(metaapi.metadata); // Just processes the .metadata part
+            let meta = Util.enforceStringOrArray(metaapi.metadata); // Just processes the .metadata part
             this.files = (metaapi && metaapi.files)
                 ? metaapi.files.map((f) => new ArchiveFile({itemid: this.itemid, metadata: f}))
                 : [];   // Default to empty, so usage simpler.
