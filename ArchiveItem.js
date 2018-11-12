@@ -53,7 +53,7 @@ class ArchiveItem extends IAJSItem {
         meta:   { metadata, files, reviews, members, and other stuff }
          */
         if (metaapi) {
-            const meta = Util.enforceStringOrArray(metaapi.metadata); // Just processes the .metadata part
+            const meta = Util.enforceStringOrArray(metaapi.metadata, Util.rules.item); // Just processes the .metadata part
             this.files = (metaapi && metaapi.files)
                 ? metaapi.files.map((f) => new ArchiveFile({itemid: this.itemid, metadata: f}))
                 : [];   // Default to empty, so usage simpler.

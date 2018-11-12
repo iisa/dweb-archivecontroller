@@ -54,12 +54,12 @@ class Util {
         return (typeof DwebArchive !== "undefined") && DwebArchive.mirror || "https://dweb.me";
     }
 
-    static enforceStringOrArray(meta) { // TODO-FJORDS move code tagged TODO-FJORDS to this routine where possible
+    static enforceStringOrArray(meta, rules) { // TODO-FJORDS move code tagged TODO-FJORDS to this routine where possible
         // The Archive is nothing but edge cases, handle some of them here so the code doesnt have to !
         // Note this called by ArchiveMember and ArchiveItem and will probably be called by ArchiveFiles so keep it generic and put class-specifics in Archive*.processMetadataFjord
         const res = {};
         Object.keys(meta).forEach(f => {
-            if (item_rules.repeatable_fields.includes(f)) {
+            if (rules.repeatable_fields.includes(f)) {
                 res[f] = (Array.isArray(meta[f]) ? meta[f] : (typeof(meta[f]) === 'string' ? [meta[f]] : [])); // [str*]
             } else {
                 if (Array.isArray(meta[f])) {
@@ -77,9 +77,9 @@ class Util {
                 }
             }
         });
-        Object.keys(item_rules.required_fields).filter(f=>((typeof res[f] === "undefined") && !item_rules.repeatable_fields.includes(f)))
+        rules.required_fields.filter(f=>((typeof res[f] === "undefined") && !rules.repeatable_fields.includes(f)))
             .forEach(f => {debug("WARNING: Metadata Fjords - field %f missing from %s", f, meta.identifier); res[f] = ""; });
-        item_rules.repeatable_fields.filter(f=>(typeof res[f] === "undefined") )
+        rules.repeatable_fields.filter(f=>(typeof res[f] === "undefined") )
             .forEach(f => res[f] = [] )
         return res;
     }
@@ -1000,13 +1000,17 @@ Util.languageMapping = {
     'zxx': 'No linguistic content'
 };
 
-//TODO migrate to use Arthurs rules from item_rules.json and then confirm in dweb-archive it follows them.
-Util.metadata = {
-    "singletons": {    // Fields that should be single entry but are occasionally multi - so concatenate
-        //"description": "<br/>" // Now assumes array
-    },
-    "arrays": ["collection", "creator", "description", "language", "updatedate", "updater" ]
-    // All other fields should be checked and enforced as single entry
-};
+// Add some fields that the gateways add to repeatable_fields
+item_rules.repeatable_fields.push('thumbnaillinks');
+// Add fields that are missing in item_rules
+item_rules.repeatable_fields.push('publisher'); // e.g. https://archive.org/metadata/GratefulDead/metadata/publisher
 
+Util.rules = {
+    item: { repeatable_fields: item_rules.repeatable_fields, required_fields: item_rules.required_fields },
+    member: { repeatable_fields:  [ "collection", "collection0thumbnaillinks", 'contributor', 'creator',
+            'external-identifier', 'format', 'indexflag','oai_updatedate','publisher',
+            'stripped_tags', 'subject', 'thumbnaillinks'],
+        required_fields: ['identifier', 'mediatype', 'publicdate', 'title'] // Doesnt have updater
+    }
+}
 exports = module.exports = Util;
