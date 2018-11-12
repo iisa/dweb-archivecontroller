@@ -6,19 +6,13 @@ Purpose to prove different levels of getting metadata
     * MetaDataService.get(commute) DONE
     * integrate into ArchiveItem DONE
     * Make IAJS use proxy, transports etc, conditional on DwebTransport DONE
-    * Do contract enforcement
-      * Make AI & AIC use [description] and make that an array, not singleton
-      * Make process use the list from Arthur
-      * Put process into Metadata.get
+    * Do contract enforcement MOSTLY DONE
+      * Put process into Metadata.get see TODO-IAUX-ISSUE-2
 
-TODO discuss
-    * Please move to debug, rather than console.log so we can selectively turn on/off debugging - I'm seeing all your debugging making it hard to find mine.
+TODO discuss see also https://git.archive.org/iaux/iaux/issues
     * Can we have non-async versions of get_metadataField, in fact I'd prefer them to default to async so we explicitly fetch the metadta for the obj which matches my semantics
-    * Would love to NOT get singleton fields as arrays, that is going to take a LOT of rewriting.
-        * I have a config table and enforce single/array to match the IA spec (description may be one that I do differently and am willing to fix)
     * Why is MetaDataService.get not static ?
     * Why doesnt MetaDataService.get give access to the datastructure and require going through "getSafe"
-    * RawMetadataAPIResponse.getSafe() doesnt work *AND* why is RawMetadataAPIResponse.metadata not exposed - just makes code more complex and somehow item.ts/js can see it
     * When I pull the metadata in, I store an array of ArchiveFiles - cant easily do this with "RawMeta..."
     * AudioFile does not have a File superclass - would be good to as do common things across files.
     * Would be nice not to bury stuff so deep e.g. IAJSItem.metadataCache.data.metadata  cf ArchiveItem.metadata

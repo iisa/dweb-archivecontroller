@@ -138,7 +138,7 @@ class ArchiveItem extends IAJSItem {
                 cb(null, this);
             }).catch(err => cb(err));
         */
-        const prom = this.getMetadata()
+        const prom = this.getMetadata()         // Calls method on IAUX.Item
         .then(rawmetadataapiresponse => {
             console.assert(rawmetadataapiresponse.data.metadata.identifier[0] === this.itemid);
             this.loadFromMetadataAPI(rawmetadataapiresponse.data); // Loads .item .files .reviews and some other fields
