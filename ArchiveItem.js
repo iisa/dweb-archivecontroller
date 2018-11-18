@@ -2,7 +2,7 @@ const canonicaljson = require('@stratumn/canonicaljson');
 const ArchiveFile = require("./ArchiveFile");
 const ArchiveMember = require("./ArchiveMember");
 const Util = require("./Util");
-const IAJSItem = require("iajs").Item;
+const IAJS = require("iajs");
 
 //require('babel-core/register')({ presets: ['env', 'react']}); // ES6 JS below!
 const debug = require('debug')('dweb-archive');
@@ -10,7 +10,7 @@ const debug = require('debug')('dweb-archive');
 //const DwebObjects = require('@internetarchive/dweb-objects'); //Not "required" because available as window.DwebObjects by separate import
 //TODO-NAMING url could be a name
 
-class ArchiveItem extends IAJSItem {
+class ArchiveItem extends IAJS.Item {
     /*
     Base class representing an Item and/or a Search query (A Collection is both).
     This is just storage, the UI is in ArchiveBase and subclasses, theoretically this class could be used for a server or gateway app with no UI.
@@ -27,7 +27,7 @@ class ArchiveItem extends IAJSItem {
 
 
     constructor({itemid = undefined, metaapi = undefined}={}) {
-        const rawmeta = metaapi ? new RawMetadataAPIResponse(metaapi) : undefined;
+        const rawmeta = metaapi ? new IAJS.RawMetadataAPIResponse(metaapi) : undefined;
         super(itemid, rawmeta); //TODO-IAJS should really be a RawMetaDataAPI
         this.itemid = itemid;   //TODO-IAJS stores this as this.identifier, can merge
         this.loadFromMetadataAPI(metaapi);
