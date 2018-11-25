@@ -232,22 +232,15 @@ class ArchiveItem extends IAJS.Item {
         }
     }
 
+    // TODO-REFACTOR-CACHE add hook in dweb-archive and use in dweb-archive.itemDetailsAlsoFound
     relatedItems(opts = {}, cb) { //TODO-REFACTOR-RELATED probably make these members
         if (typeof opts === "function") { cb = opts; opts = {}; } // Allow opts parameter to be skipped
-        if (cb) { return this._relatedItems(opts, cb) } else { return new Promise((resolve, reject) => this._relatedItems(opts, (err, res) => { if (err) {reject(err)} else {resolve(res)} }))}
-
-
-    }
-    _relatedItems({wantStream=false} = {}, cb) {  //TODO-REFACTOR-RELATED probably make these members
-        /*
-        cb(err, obj)  Callback on completion with related items object
-        TODO-REFACTOR-CACHE add hook in dweb-archive and use in dweb-archive.itemDetailsAlsoFound
-        */
-        const relatedUrl = ( DwebArchive.mirror ? (Util.gatewayServer()+Util.gateway.url_related_local) : Util.gateway.url_related)+this.itemid;
-        if (wantStream) { // Stream doesnt really make sense unless caching to file
-            DwebTransports.createReadStream(relatedUrl, {}, cb);
+        const prom = new IAJS.RelatedService().get({identifier: this.itemid});
+        if (cb) {
+            prom.then(res => cb(null, res)).catch(err => cb(err));
+            return undefined;
         } else {
-            Util.fetch_json(relatedUrl, cb);
+                return prom;
         }
     }
 
