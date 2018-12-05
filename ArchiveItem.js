@@ -31,7 +31,8 @@ class ArchiveItem extends IAJS.Item {
     constructor({itemid = undefined, query = undefined, metaapi = undefined}={}) {
         const rawmeta = metaapi ? new IAJS.RawMetadataAPIResponse(metaapi) : undefined;
         super(itemid, rawmeta); //TODO-IAJS should really be a RawMetaDataAPI
-        this.itemid = itemid;   //TODO-IAJS stores this as this.identifier, can merge
+        this.itemid = itemid; //TODO-IAJS stores this as this.identifier, TODO-IAUX merge itemid into identifier
+        this.loadFromMetadataAPI(metaapi); // Note - must be after itemid loaded
         this.query = query;
     }
 
@@ -47,23 +48,26 @@ class ArchiveItem extends IAJS.Item {
         return this.files.map(f => f.metadata);
     }
     exportMetadataAPI() {
-        return {
-            files: this.exportFiles(),
-            files_count: this.files_count,
-            collection_sort_order: this.collection_sort_order,
-            collection_titles: this.collection_titles,
-            members: this.members,
-            metadata: this.metadata,
-            reviews: this.reviews,
-        }
+        return this.metadataCache           // Came from IAUX pass on as IAUX as handled differently in ArchiveItem.constructir
+            ? this.metadataCache.data        // Note this doesnt include members, but members aren't present where this is used.
+            : {
+                files: this.exportFiles(),
+                files_count: this.files_count,
+                collection_sort_order: this.collection_sort_order,
+                collection_titles: this.collection_titles,
+                members: this.members,
+                metadata: this.metadata,
+                reviews: this.reviews,
+                }
     }
     loadFromMetadataAPI(metaapi) {
         /*
-        Apply the results of a metadata API call to an ArchiveItem,
+        Apply the results of a metadata API or exportMetadataAPI() call to an ArchiveItem,
         meta:   { metadata, files, reviews, members, and other stuff }
          */
         if (metaapi) {
             const meta = Util.enforceStringOrArray(metaapi.metadata, Util.rules.item); // Just processes the .metadata part
+            console.assert(this.itemid, "itemid should be loaded before here - if legit reason why not, then load from meta.identifier")
             this.files = (metaapi && metaapi.files)
                 ? metaapi.files.map((f) => new ArchiveFile({itemid: this.itemid, metadata: f}))
                 : [];   // Default to empty, so usage simpler.
@@ -308,11 +312,13 @@ class ArchiveItem extends IAJS.Item {
         return this.files.find(fi => fi.playable(type));  // Can be undefined if none included
     }
 
+    /*
     async itemid() {
         console.assert(false, 'I dont this can ever get called, constructor will be overwriting it');
         await this.fetch_metadata();
         return this.metadata.identifier; // Short cut since metadata changes may move this
     }
+    */
 
     setPlaylist(type) { //TODO could order the playability and pick by preference
         /*
