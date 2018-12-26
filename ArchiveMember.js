@@ -1,5 +1,6 @@
 const ArchiveFile = require("./ArchiveFile");
 const Util = require("./Util");
+const debug = require('debug')('dweb-archivecontroller:ArchiveMember');
 
 class ArchiveMember {
     /*
@@ -23,7 +24,7 @@ class ArchiveMember {
     thumbnailFile() {
         /-*
         Return the thumbnailfile for a member, via its item,
-        this should handle the case of whether the item has had metadata fetched or not, and must be synchronous as stored in <img src=> (the resolution is asyncHronous)
+        this should handle the case of whether the item has had metadata fetched or not, and must be synchronous as stored in <img src=> (the resolution is asynchronous)
          *-/
         // New items should have __ia_thumb.jpg but older ones dont
         // noinspection JSUnresolvedVariable
@@ -55,6 +56,9 @@ class ArchiveMember {
     collection0() {
         // The first collection listed, for ArchiveMemberFav this is probably undefined
         return (this.collection && this.collection.length) ? this.collection[0] : undefined;
+    }
+    isExpanded() {
+        return this.publicdate && this.title;
     }
 }
 exports = module.exports = ArchiveMember;

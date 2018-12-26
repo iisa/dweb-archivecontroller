@@ -1,8 +1,6 @@
-const canonicaljson = require('@stratumn/canonicaljson');
 const ArchiveFile = require("./ArchiveFile");
 const ArchiveMemberFav = require("./ArchiveMemberFav");
 const ArchiveMemberSearch = require("./ArchiveMemberSearch");
-const ArchiveMember = require("./ArchiveMember");
 const Util = require("./Util");
 const IAJS = require("iajs");
 
@@ -82,7 +80,8 @@ class ArchiveItem extends IAJS.Item {
                 debug('Metadata Fjords - switched mediatype on %s from "education" to %s', meta.identifier, meta.mediatype);
             }
             this.metadata = meta;
-            //this.members = metaapi.members; //TODO - see note on _fetch_query about oddities between this and ITEMID_members.json
+            //These will be ArchiveMemberFav, its converted to ArchiveMemberSearch by fetch_query (either from cache or in _fetch_query>expandMembers)
+            this.members = metaapi.members && metaapi.members.map(o => new ArchiveMemberFav(o));
             this.reviews = metaapi.reviews;
             this.files_count = metaapi.files_count;
             this.collection_titles = metaapi.collection_titles;
@@ -120,7 +119,8 @@ class ArchiveItem extends IAJS.Item {
         Its monkeypatched because of all the places inside dweb-archive that call fetch_query
         cb(err, this) or if undefined, returns a promise resolving to 'this'
          */
-        if (typeof opts === "function") { cb = opts; opts = {}; } // Allow opts parameter to be skipped
+        if (typeof opts === "function") { cb = opts; // noinspection JSUnusedAssignment
+            opts = {}; } // Allow opts parameter to be skipped
         if (cb) { return f.call(this, cb) }
         else { return new Promise((resolve, reject) => f.call(this, (err, res) => { if (err) {reject(err)} else {resolve(res)} }))}        //NOTE this is PROMISIFY pattern used elsewhere
         function f(cb) {
@@ -142,6 +142,7 @@ class ArchiveItem extends IAJS.Item {
         // Fetch using Transports as its multiurl and might not be HTTP urls
         /* ORIGINAL
         const name = `dweb:/arc/archive.org/metadata/${this.itemid}`;
+        // noinspection JSUnusedLocalSymbols
         const prom = DwebTransports.p_rawfetch([name], {timeoutMS: 5000})    //TransportError if all urls fail (e.g. bad itemid)
             .then((m) => {
                 // noinspection ES6ModulesDependencies
@@ -182,78 +183,64 @@ class ArchiveItem extends IAJS.Item {
     _wrapMembersInResponse(members) {
         return { response: { numFound: undefined, start: this.start, docs: members }}
     }
+
+    _expandMembers(cb) {
+        const ids = this.members && this.members.filter(am => !am.isExpanded()).map(am => am.identifier);
+        if (ids) {
+            ArchiveMemberSearch.expand(ids, (err, res) => {
+                if (!err) {
+                    this.members = this.members.map(m => res[m.identifier] || m);
+                }
+                cb(null, this);  // Dont pass error up, its ok not to be able to expand some or all of them
+            });
+        } else {
+            cb(null, this); // Nothing to expand
+        }
+    }
+
     _fetch_query({wantFullResp=false}={}, cb) { // No opts currently
         // noinspection JSUnresolvedVariable
         // rejects: TransportError or CodingError if no urls
         // First we look for the fav-xyz type collection, where there is an explicit JSON of the members
-        //TODO there are some oddities here since members also comes back in the metadata query for the case of a members file being present, not currently saving in loadFromMetaAPI
         try {
-            let membersAF;
-            if (this.itemid) {
-                const memberFileName = `${this.itemid}_members.json`;
-                membersAF = this.files.find(af => af.metadata.name === memberFileName);   // af || undefined
-            }
-            if (membersAF) {
-                membersAF.data((err, jsonstring) => {
-                    if (err) {
-                        debug("Unable to read member data from %s/%s", this.itemid, membersAF);
-                        cb(err);
-                    } else {
-                        // noinspection JSUnresolvedVariable
-                        this.start = (this.page - 1) * this.limit;
-                        // noinspection JSUnresolvedVariable
-                        const memberClass = this.itemid.startsWith('fav-') ? ArchiveMemberFav : ArchiveMemberSearch;
-                        const newmembers = ((typeof jsonstring === 'string' || jsonstring instanceof Uint8Array) ? canonicaljson.parse(jsonstring) : jsonstring)
-                            .slice(this.start, this.page * this.limit)
-                            .map(o => new memberClass(o)); // See copy of some of this logic in dweb-mirror.MirrorCollection.fetch_query
-                        this._appendMembers(newmembers); // Note these are ArchiveMembers, not ArchiveItems
-                        // Note this does NOT support sort, there isnt enough info in members.json to do that
-                        // Also that numFound isnt defined since we dont know the total number, only the number previously cached.
-                        cb(null, wantFullResp ? this._wrapMembersInResponse(newmembers) : newmembers); // Skipping responseHeader, can add if anything requires it
+            // noinspection JSUnusedLocalSymbols
+            // noinspection JSUnusedLocalSymbols
+            this._expandMembers((err, self) => { // Always succeeds even if it fails it just leaves members unexpanded.
+                if ((typeof this.members === "undefined") || this.members.length < (Math.max(this.page,1)*this.limit)) { // Either cant read file (cos yet cached), or it has a smaller set of results
+                    if (this.metadata && this.metadata.search_collection) { // Search will have !this.item
+                        this.query = this.metadata.search_collection.replace('\"', '"');
                     }
-                });
-            } else {
-                // noinspection JSUnresolvedVariable
-                if (this.metadata && this.metadata.search_collection) { // Search will have !this.item
-                    // noinspection JSUnresolvedVariable
-                    this.query = this.metadata.search_collection.replace('\"', '"');
-                }
-                if (this.query) {   // If this is a "Search" then will come here.
-                    // noinspection JSUnresolvedVariable
-                    const sort = this.collection_sort_order || this.sort;
-                    // noinspection JSUnresolvedVariable
+                    if (this.query) {   // If this is a "Search" then will come here.
+                        const sort = this.collection_sort_order || this.sort;
 
-                    const urlparms = Object.entries({
+                        Util._query( {
                             output: "json",
                             q: this.query,
                             rows: this.limit,
                             page: this.page,
                             'sort[]': sort,
                             'and[]': this.and,
-                            'save': 'yes'
-                            })
-                        .filter(kv => typeof kv[1] !== "undefined")
-                        .map(kv => `${kv[0]}=${encodeURIComponent(kv[1])}`)
-                        .join('&');
-                    // Note direct call to archive.org leads to CORS fail
-                    const url = `${Util.gatewayServer()}${Util.gateway.url_advancedsearch}?${urlparms}`;
-                    debug("Searching with %s", url);
-                    Util.fetch_json(url, (err, j) => { // Will get error "failed to fetch" if fails
-                        if (err) {
-                            cb(err)
-                        } // Failed to fetch
-                        else {
-                            const newmembers = j.response.docs.map(o => new ArchiveMemberSearch(o));
-                            this._appendMembers(newmembers);
-                            this.start = j.response.start;
-                            this.numFound = j.response.numFound;
-                            cb(null, wantFullResp ? j : newmembers);  // wantFullResp is used when proxying unmodified result
-                        }
-                    });
-                } else { // Neither query, nor metadata.search_collection nor file/ITEMID_members.json so not really a collection
-                    cb(null, undefined); // No results return undefined (which is also what the patch in dweb-mirror does if no collection instead of empty array)
+                            'save': 'yes',
+                            'fl': Util.gateway.url_default_fl,  // Ensure get back fields necessary to paint tiles
+                        }, (err, j) => {
+                            if (err) { // Will get error "failed to fetch" if fails
+                                cb(err)
+                            } else {
+                                const newmembers = j.response.docs.map(o => new ArchiveMemberSearch(o));
+                                this._appendMembers(newmembers);
+                                this.start = j.response.start;
+                                this.numFound = j.response.numFound;
+                                cb(null, wantFullResp ? j : newmembers);  // wantFullResp is used when proxying unmodified result
+                            }
+                        });
+                    } else { // Neither query, nor metadata.search_collection nor file/ITEMID_members.json so not really a collection
+                        cb(null, undefined); // No results return undefined (which is also what the patch in dweb-mirror does if no collection instead of empty array)
+                    }
+                } else {
+                    const newmembers = this.members.slice((this.page - 1) * this.limit, this.page * this.limit);
+                    cb(null, wantFullResp ? this._wrapMembersInResponse(newmembers) : newmembers);
                 }
-            }
+            });
         } catch(err) {
             console.error('Caught unexpected error in ArchiveItem._fetch_query',err);
             cb(err);
@@ -391,9 +378,60 @@ class ArchiveItem extends IAJS.Item {
 
             }, {}
         );
-        this.playlist = Object.values(pl).filter(p => p.sources.length);
+        this.playlist = Object.values(pl).filter(p => p.sources.length > 0);
     }
 
+    minimumForUI() {
+        /*
+         returns: [ ArchiveFile* ]  minimum files required to play this item
+        */
+        // This will be tuned for different mediatype etc}
+        // Note mediatype will have been retrieved and may have been rewritten by processMetadataFjords from "education"
+        const minimumFiles = [];
+        if (this.itemid) { // Exclude "search"
+            console.assert(this.files, "minimumForUI assumes .files already set up");
+            const thumbnailFiles = this.files.filter(af =>
+                af.metadata.name === "__ia_thumb.jpg"
+                || af.metadata.name.endsWith("_itemimage.jpg")
+            );
+            // Note thumbnail is also explicitly saved by saveThumbnail
+            minimumFiles.push(...thumbnailFiles);
+            switch (this.metadata.mediatype) {
+                case "search": // Pseudo-item
+                    break;
+                case "collection": //TODO-THUMBNAILS
+                    break;
+                case "texts": //TODO-THUMBNAILS for text - texts use the Text Reader anyway so dont know which files needed
+                    break;
+                case "image":
+                    minimumFiles.push(this.files.find(fi => fi.playable("image"))); // First playable image is all we need
+                    break;
+                case "audio":  //TODO-THUMBNAILS check that it can find the image for the thumbnail with the way the UI is done. Maybe make ReactFake handle ArchiveItem as teh <img>
+                case "etree":   // Generally treated same as audio, at least for now
+                    if (!this.playlist) { // noinspection JSUnresolvedFunction
+                        this.setPlaylist();
+                    }
+                    // Almost same logic for video & audio
+                    minimumFiles.push(...Object.values(this.playlist).map(track => track.sources[0].urls)); // First source from each (urls is a single ArchiveFile in this case)
+                    // Audio uses the thumbnail image, puts URLs direct in html, but that always includes http://dweb.me/thumbnail/itemid which should get canonicalized
+                    break;
+                case "movies":
+                    if (!this.playlist) { // noinspection JSUnresolvedFunction
+                        this.setPlaylist();
+                    }
+                    // Almost same logic for video & audio
+                    minimumFiles.push(...Object.values(this.playlist).map(track => track.sources[0].urls)); // First source from each (urls is a single ArchiveFile in this case)
+                    // noinspection JSUnresolvedFunction
+                    minimumFiles.push(this.videoThumbnailFile());
+                    break;
+                case "account":
+                    break;
+                default:
+                //TODO Not yet supporting software, zotero (0 items); data; web because rest of dweb-archive doesnt
+            }
+        }
+        return minimumFiles;
+    };
 
 }
 exports = module.exports = ArchiveItem;
