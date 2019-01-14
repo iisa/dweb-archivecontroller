@@ -5,7 +5,7 @@ const Util = require("./Util");
 const IAJS = require("iajs");
 
 //require('babel-core/register')({ presets: ['env', 'react']}); // ES6 JS below!
-const debug = require('debug')('dweb-archivecontroller');
+const debug = require('debug')('dweb-archivecontroller:ArchiveItem');
 //const DwebTransports = require('@internetarchive/dweb-transports'); //Not "required" because available as window.DwebTransports by separate import
 //const DwebObjects = require('@internetarchive/dweb-objects'); //Not "required" because available as window.DwebObjects by separate import
 //TODO-NAMING url could be a name
@@ -53,6 +53,7 @@ class ArchiveItem extends IAJS.Item {
                 files_count: this.files_count,
                 collection_sort_order: this.collection_sort_order,
                 collection_titles: this.collection_titles,
+                is_dark: this.is_dark,
                 members: this.members,
                 metadata: this.metadata,
                 reviews: this.reviews,
@@ -64,28 +65,31 @@ class ArchiveItem extends IAJS.Item {
         meta:   { metadata, files, reviews, members, and other stuff }
          */
         if (metaapi) {
-            const meta = Util.enforceStringOrArray(metaapi.metadata, Util.rules.item); // Just processes the .metadata part
             console.assert(this.itemid, "itemid should be loaded before here - if legit reason why not, then load from meta.identifier")
             this.files = (metaapi && metaapi.files)
                 ? metaapi.files.map((f) => new ArchiveFile({itemid: this.itemid, metadata: f}))
                 : [];   // Default to empty, so usage simpler.
-            if (meta.mediatype === "education") {
-                // Typically miscategorized, have a guess !
-                if (this.files.find(af => af.playable("video")))
-                    meta.mediatype = "movies";
-                else if (this.files.find(af => af.playable("text")))
-                    meta.mediatype = "texts";
-                else if (this.files.find(af => af.playable("image")))
-                    meta.mediatype = "image";
-                debug('Metadata Fjords - switched mediatype on %s from "education" to %s', meta.identifier, meta.mediatype);
+            if (metaapi.metadata) {
+                const meta = Util.enforceStringOrArray(metaapi.metadata, Util.rules.item); // Just processes the .metadata part
+                if (meta.mediatype === "education") {
+                    // Typically miscategorized, have a guess !
+                    if (this.files.find(af => af.playable("video")))
+                        meta.mediatype = "movies";
+                    else if (this.files.find(af => af.playable("text")))
+                        meta.mediatype = "texts";
+                    else if (this.files.find(af => af.playable("image")))
+                        meta.mediatype = "image";
+                    debug('Metadata Fjords - switched mediatype on %s from "education" to %s', meta.identifier, meta.mediatype);
+                }
+                this.metadata = meta;
             }
-            this.metadata = meta;
             //These will be ArchiveMemberFav, its converted to ArchiveMemberSearch by fetch_query (either from cache or in _fetch_query>expandMembers)
             this.members = metaapi.members && metaapi.members.map(o => new ArchiveMemberFav(o));
             this.reviews = metaapi.reviews;
             this.files_count = metaapi.files_count;
             this.collection_titles = metaapi.collection_titles;
             this.collection_sort_order = metaapi.collection_sort_order;
+            this.is_dark = metaapi.is_dark;
         }
         //return metaapi;// Broken but unused
         return undefined;
@@ -121,19 +125,19 @@ class ArchiveItem extends IAJS.Item {
          */
         if (typeof opts === "function") { cb = opts; // noinspection JSUnusedAssignment
             opts = {}; } // Allow opts parameter to be skipped
-        if (cb) { return f.call(this, cb) }
-        else { return new Promise((resolve, reject) => f.call(this, (err, res) => { if (err) {reject(err)} else {resolve(res)} }))}        //NOTE this is PROMISIFY pattern used elsewhere
+
+        if (cb) { try { f.call(this, cb) } catch(err) { cb(err)}} else { return new Promise((resolve, reject) => { try { f.call(this, (err, res) => { if (err) {reject(err)} else {resolve(res)} })} catch(err) {reject(err)}})} // Promisify pattern v2
         function f(cb) {
             // noinspection JSPotentiallyInvalidUsageOfClassThis
-            if (this.itemid && !this.metadata) {
+            if (this.itemid && !(this.metadata || this.is_dark)) { // If havent already fetched (is_dark means no .metadata field)
                 // noinspection JSPotentiallyInvalidUsageOfClassThis
-                this._fetch_metadata(cb); // Processes Fjords & Loads .metadata .files etc
+                this._fetch_metadata(opts, cb); // Processes Fjords & Loads .metadata .files etc
             } else {
                 cb(null, this);
             }
         }
     }
-    _fetch_metadata(cb) {
+    _fetch_metadata(opts, cb) {
         /*
         Fetch the metadata for this item - dont use directly, use fetch_metadata.
          */
@@ -147,10 +151,16 @@ class ArchiveItem extends IAJS.Item {
             .then((m) => {
                 // noinspection ES6ModulesDependencies
                 const metaapi = DwebObjects.utils.objectfrom(m); // Handle Buffer or Uint8Array
-                console.assert(metaapi.metadata.identifier === this.itemid);
-                this.loadFromMetadataAPI(metaapi); // Loads .item .files .reviews and some other fields
-                debug("metadata for %s fetched successfully", this.itemid);
-                cb(null, this);
+                if (metaapi.is_dark && !opts.darkOk) { // Only some code handles dark metadata ok
+                    this.is_dark = true; // Flagged so wont continuously try and call
+                    cb(new Error(`Item ${this.itemid} is dark`));
+                } else if (!m.is_dark && (metaapi.metadata.identifier !== this.itemid)) {
+                    cb(new Error(`_fetch_metadata didnt read back expected identifier for ${this.itemid}`));
+                } else {
+                    debug("metadata for %s fetched successfully %s", m.itemid, this.is_dark ? "BUT ITS DARK" : "");
+                    this.loadFromMetadataAPI(metaapi); // Loads .item .files .reviews and some other fields
+                    cb(null, this);
+                }
             }).catch(err => cb(err));
         */
         const prom = this.getMetadata()         // Calls method on IAUX.Item
@@ -185,7 +195,7 @@ class ArchiveItem extends IAJS.Item {
     }
 
     _expandMembers(cb) {
-        const ids = this.members && this.members.filter(am => !am.isExpanded()).map(am => am.identifier);
+        const ids = this.members && this.members.filter(am=>am.mediatype !== "search").filter(am => !am.isExpanded()).map(am => am.identifier);
         if (ids) {
             ArchiveMemberSearch.expand(ids, (err, res) => {
                 if (!err) {
@@ -199,24 +209,36 @@ class ArchiveItem extends IAJS.Item {
     }
 
     _fetch_query({wantFullResp=false}={}, cb) { // No opts currently
-        // noinspection JSUnresolvedVariable
-        // rejects: TransportError or CodingError if no urls
+        /*
+            rejects: TransportError or CodingError if no urls
+
+            Several differnet scenarios
+            Defined by a members.json file e.g. "fav-brewster"
+            Defined by a metadata.search_collection e.g. "ElectricSheep"
+            Defined by mediatype:collection, query should be q=collection:<IDENTIFIER>
+            Defined by query - e.g. from searchbox
+
+        */
         // First we look for the fav-xyz type collection, where there is an explicit JSON of the members
         try {
             // noinspection JSUnusedLocalSymbols
             // noinspection JSUnusedLocalSymbols
+            this.page = this.page || 1; // Page starts at 1, sometimes set to 0, or left undefined.
             this._expandMembers((err, self) => { // Always succeeds even if it fails it just leaves members unexpanded.
-                if ((typeof this.members === "undefined") || this.members.length < (Math.max(this.page,1)*this.limit)) { // Either cant read file (cos yet cached), or it has a smaller set of results
-                    if (this.metadata && this.metadata.search_collection) { // Search will have !this.item
+                if ((typeof this.members === "undefined") || this.members.length < (Math.max(this.page,1)*this.rows)) {
+                    // Either cant read file (cos yet cached), or it has a smaller set of results
+                    if (this.metadata && this.metadata.search_collection) { // Search will have !this.item example = "ElectricSheep"
                         this.query = this.metadata.search_collection.replace('\"', '"');
                     }
+                    if (!this.query && this.metadata.mediatype === "collection") {  //TODO-TEST its possible with this that dont need to define query in Collection classes (MirrorCollection, or dweb-archive)
+                        this.query = "collection:"+this.itemid
+                    }
                     if (this.query) {   // If this is a "Search" then will come here.
-                        const sort = this.collection_sort_order || this.sort;
-
+                        const sort = this.collection_sort_order || this.sort || "-downloads"; //TODO remove sort = "-downloads" from various places (dweb-archive, dweb-archivecontroller, dweb-mirror) and add default here
                         Util._query( {
                             output: "json",
                             q: this.query,
-                            rows: this.limit,
+                            rows: this.rows,
                             page: this.page,
                             'sort[]': sort,
                             'and[]': this.and,
@@ -237,7 +259,7 @@ class ArchiveItem extends IAJS.Item {
                         cb(null, undefined); // No results return undefined (which is also what the patch in dweb-mirror does if no collection instead of empty array)
                     }
                 } else {
-                    const newmembers = this.members.slice((this.page - 1) * this.limit, this.page * this.limit);
+                    const newmembers = this.members.slice((this.page - 1) * this.rows, this.page * this.rows);
                     cb(null, wantFullResp ? this._wrapMembersInResponse(newmembers) : newmembers);
                 }
             });
@@ -247,16 +269,25 @@ class ArchiveItem extends IAJS.Item {
         }
     }
 
-    // TODO-REFACTOR-CACHE add hook in dweb-archive and use in dweb-archive.itemDetailsAlsoFound
-    relatedItems(opts = {}, cb) { //TODO-REFACTOR-RELATED probably make these members
+    relatedItems(opts = {}, cb) { // {wantStream = false, wantMembers = false}
+        /* This is complex because handles three cases, where want a stream, the generic result of the query or the results expanded to Tile-able info
+            Current usage:
+            in dweb-mirror/ArchiveItemPatched.relatedItems ... subclassed to expand itself, cache and return obj
+            //Not in IAUX: in dweb-mirror/CrawlManager CrawlItem.process uses ArchiveItemPatched.relatedItems
+            in dweb-mirror/mirrorHttp/sendRelated wantStream=true
+            in dweb-archive/Details/itemDetailsAlsoFound > loadDetailsAlsoFound > TileComponent which needs expansion
+            returns either related items object or array of members, via cb or Promise (stream not supported in IAUX)
+        */
         if (typeof opts === "function") { cb = opts; opts = {}; } // Allow opts parameter to be skipped
-        const prom = new IAJS.RelatedService().get({identifier: this.itemid});
-        if (cb) {
-            prom.then(res => cb(null, res)).catch(err => cb(err));
-            return undefined;
-        } else {
-                return prom;
-        }
+        console.assert(!opts.wantStream, "IAUX branch doesnt support wantStream since already converted to object");
+        const prom = new IAJS.RelatedService().get({identifier: this.itemid}).then(rels => {
+            if (opts.wantMembers) {
+                return ArchiveMemberSearch.expandRels(rels) // promise => [ ArchiveSearchMember* ]
+            } else {
+                return rels;
+            }
+        })
+        if (cb) { prom.catch((err) => cb(err)).then((res)=>cb(null,res)); } else { return prom; } // Unpromisify pattern v2
     }
 
     async thumbnaillinks() {

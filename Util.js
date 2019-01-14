@@ -2,27 +2,20 @@
 const canonicaljson = require('@stratumn/canonicaljson');
 const debug = require('debug')('dweb-archivecontroller:Util');
 const item_rules = require('./item_rules.js');
-//TODO-REFACTOR-REPO - remove excess crud from here, then remove stuff here from dweb-archive and include this Util
+
 class Util {
 
+
     static fetch_json(url, cb) {
-        //TODO-PROMISIFY this is a temp patch between cb and promise till p_fetch_json handles cb
-        if (cb) {
-            this.p_fetch_json(url).then(j => cb(null, j)).catch(err => cb(err));
-        } else {
-            return this.p_fetch_json(url); // Return a promise
-        }
-    }
-    static async p_fetch_json(url) {
         /*
         url:   to be fetched - construct CORS safe JSON enquiry.
         throws: TypeError if cant fetch
         throws: Error if fetch doesnt return JSON.
         throws: Error if fail to fetch
-        resolves to: Decoded json response
+        returns Decoded json response via cb or promise
          */
-        debug("p_fetch_json: %s",url);
-        const response = await fetch(new Request(url, // Throws TypeError on failed fetch
+        debug("fetch_json: %s",url);
+        const prom = fetch(new Request(url, // Throws TypeError on failed fetch
             {
                 method: 'GET',
                 headers: new Headers(),
@@ -30,18 +23,20 @@ class Util {
                 cache: 'default',
                 redirect: 'follow',  // Chrome defaults to manual
             }
-        ));
-        if (response.ok) {
-            if (response.headers.get('Content-Type').startsWith("application/json")) {
-                return await response.json(); // response.json is a promise resolving to JSON already parsed
-            } else {
-                const t = response.text(); // promise resolving to text
-                throw new Error(`Unable to fetch, return was not JSON - got: ${response.headers.get('Content-Type')} ${t}`);
+        )).then(response => {
+            if (response.ok) {
+                if (response.headers.get('Content-Type').startsWith("application/json")) {
+                    return await response.json(); // response.json is a promise resolving to JSON already parsed
+                } else {
+                    const t = response.text(); // promise resolving to text
+                    throw new Error(`Unable to fetch, return was not JSON - got: ${response.headers.get('Content-Type')} ${t}`);
+                }
+            } else { // response not OK (some files e.g. https://dweb.me/arc/archive.org/metadata/kaled_jalil/001.mp3 get !response.ok instead of error
+                // Note - if copy this for binary files, make sure to look at TransportHTTP which uses response.arrayBuffer
+                throw new Error(`failed to fetch ${url} message=${response.status} ${response.statusText}`);
             }
-        } else { // response not OK (some files e.g. https://dweb.me/arc/archive.org/metadata/kaled_jalil/001.mp3 get !response.ok instead of error
-            // Note - if copy this for binary files, make sure to look at TransportHTTP which uses response.arrayBuffer
-            throw new Error(`failed to fetch ${url} message=${response.status} ${response.statusText}`);
-        }
+        });
+        if (cb) { prom.catch((err) => cb(err)).then((res)=>cb(null,res)); } else { return prom; } // Unpromisify pattern v2
     }
 
     static formats(k,v,{first=true}={}) {
@@ -56,33 +51,32 @@ class Util {
         return (typeof DwebArchive !== "undefined") && DwebArchive.mirror || "https://dweb.me";
     }
 
-    static enforceStringOrArray(meta, rules) { // TODO-FJORDS move code tagged TODO-FJORDS to this routine where possible
+    static enforceStringOrArray(meta, rules) { // See ArchiveItem.loadMetadataFromAPI for other Fjord handling
         // The Archive is nothing but edge cases, handle some of them here so the code doesnt have to !
         // Note this called by ArchiveMember and ArchiveItem and will probably be called by ArchiveFiles so keep it generic and put class-specifics in Archive*.processMetadataFjord
         const res = {};
         Object.keys(meta).forEach(f => {
-            if (rules.repeatable_fields.includes(f)) {
-                res[f] = (Array.isArray(meta[f]) ? meta[f] : (typeof(meta[f]) === 'string' ? [meta[f]] : [])); // [str*]
-            } else {
+            if (rules.nonrepeatable_fields.includes(f)) {
                 if (Array.isArray(meta[f])) {
-                    if (meta[f].length > 1) { //TODO-IAJS TODO-FJORDS change this to use the rules in item_rules.js
+                    if (meta[f].length > 1) {
                         debug("WARNING: Metadata Fjords - multi item in non-repeating field %s on %s, choosing first", f, meta.identifier);
-                        res[f] = meta[f][0];
-                    } else if (meta[f].length > 0) {
-                        res[f] = meta[f][0];
-                    } else { // Empty array
-                        res[f] = "";     // Old standard would have it undefined if not in singletons else "" - can do that if we test for undefined anywhere
                     }
+                    res[f] = (meta[f].length > 0) ? meta[f][0] : "";
+                        // Old standard would have it undefined if not in singletons else "" - can do that if we test for undefined anywhere
                 } else {
                     // Already converted to string and want a string
                     res[f] = meta[f];
                 }
+            } else {
+                res[f] = (Array.isArray(meta[f]) ? meta[f] : (typeof(meta[f]) === 'string' ? [meta[f]] : [])); // [str*]
+
             }
         });
-        rules.required_fields.filter(f=>((typeof res[f] === "undefined") && !rules.repeatable_fields.includes(f)))
-            .forEach(f => {debug("WARNING: Metadata Fjords - field %s missing from %s", f, meta.identifier); res[f] = ""; });
-        rules.repeatable_fields.filter(f=>(typeof res[f] === "undefined") )
-            .forEach(f => res[f] = [] );
+        rules.required_fields.filter(f=>(typeof res[f] === "undefined"))
+            .forEach(f => {
+                debug("WARNING: Metadata Fjords - required field %s missing from %s", f, meta.identifier);
+                res[f] = rules.nonrepeatable_fields.includes(f) ? "" : []
+            });
         return res;
     }
 }
@@ -654,13 +648,23 @@ Util._formatarr = [
 Util.gateway = {
     "url_download": "/arc/archive.org/download/",
     "url_servicesimg": "/arc/archive.org/thumbnail/",
-    "url_torrent": "/arc/archive.org/torrent/", //TODO-MIRROR support this
+    "url_torrent": "/arc/archive.org/torrent/", //TODO-MIRROR support this (actually, not quite sure what this command means, maybe making sure we get rewritten torrents)
     "url_metadata": "/arc/archive.org/metadata/",
     "url_advancedsearch": "/arc/archive.org/advancedsearch",
-    "url_related": "https://be-api.us.archive.org/mds/v1/get_related/all/",   // Direct, no CORS issues //TODO-MIRROR fix this
-    "url_related_local": "/arc/archive.org/mds/v1/get_related/all/",  // Direct, no CORS issues //TODO-MIRROR fix this
+    "url_related": "https://be-api.us.archive.org/mds/v1/get_related/all/",   // Direct, no CORS issues
+    "url_related_local": "/arc/archive.org/mds/v1/get_related/all/",  // Direct, no CORS issues
     "url_default_fl": "identifier,title,collection,mediatype,downloads,creator,num_reviews,publicdate,item_count,loans__status__status"  // Note also used in dweb-mirror
 };
+//https://archive.org/advancedsearch.php?q=mediatype:collection AND NOT noindex:true AND NOT collection:web AND NOT identifier:(fav-* OR what_cd OR cd OR vinyl OR librarygenesis OR bibalex OR movies OR audio OR texts OR software OR image OR data OR web OR additional_collections OR animationandcartoons OR artsandmusicvideos OR audio_bookspoetry OR audio_foreign OR audio_music OR audio_news OR audio_podcast OR audio_religion OR audio_tech OR computersandtechvideos OR coverartarchive OR culturalandacademicfilms OR ephemera OR gamevideos OR inlibrary OR moviesandfilms OR newsandpublicaffairs OR ourmedia OR radioprograms OR samples_only OR spiritualityandreligion OR stream_only OR television OR test_collection OR usgovfilms OR vlogs OR youth_media)&sort[]=-downloads&rows=10&output=json&save=yes&page=
+Util.homeSkipIdentifiers = ['what_cd','cd','vinyl','librarygenesis','bibalex',  // per alexis
+        'movies','audio','texts','software','image','data','web', // per alexis/tracey
+        'additional_collections','animationandcartoons','artsandmusicvideos','audio_bookspoetry',
+        'audio_foreign','audio_music','audio_news','audio_podcast','audio_religion','audio_tech',
+        'computersandtechvideos','coverartarchive','culturalandacademicfilms','ephemera',
+        'gamevideos','inlibrary','moviesandfilms','newsandpublicaffairs','ourmedia',
+        'radioprograms','samples_only','spiritualityandreligion','stream_only',
+        'television','test_collection','usgovfilms','vlogs','youth_media'];
+Util.homeQuery = `mediatype:collection AND NOT noindex:true AND NOT collection:web AND NOT identifier:fav-* AND NOT identifier:( ${Util.homeSkipIdentifiers.join(' OR ')})`;
 
 // NOTE: copied _verbatim_ from  Details::$langList & Languages.inc until @hank and @ximm weigh in.. 8-)
 Util.languageMapping = {
@@ -1009,11 +1013,17 @@ item_rules.repeatable_fields.push('thumbnaillinks');
 item_rules.repeatable_fields.push('publisher'); // e.g. https://archive.org/metadata/GratefulDead/metadata/publisher
 
 Util.rules = {
-    item: { repeatable_fields: item_rules.repeatable_fields, required_fields: item_rules.required_fields },
-    memberSearch: { repeatable_fields:  [ "collection", "collection0thumbnaillinks", 'creator', 'thumbnaillinks'],  //TODO use nonrepeatable fields
-        required_fields: ['identifier', 'mediatype', 'publicdate', 'title'] // Doesnt have updater
+    item: item_rules,
+    memberSearch: {
+        repeatable_fields:  [ "collection", "collection0thumbnaillinks", 'creator', 'thumbnaillinks'],
+        nonrepeatable_fields: item_rules.nonrepeatable_fields,
+        required_fields: Util.gateway.url_default_fl.filter(f => item_rules.required_fields.includes(f))
     },
-    memberFav: { repeatable_fields: [], required_fields: ['identifier', 'updatedate', 'mediatype']}
+    memberFav: { // Expect fields for url_default_fl above:
+        repeatable_fields: [],
+        required_fields: ['identifier', 'updatedate', 'mediatype'],
+        nonrepeatable_fields: ['identifier', 'updatedate', 'mediatype']
+    }
 };
 Object.fromEntries = (arr) => arr.reduce((res,kv)=>(res[kv[0]]=kv[1],res),{});
 Object.filter = (obj, f) => Object.fromEntries( Object.entries(obj).filter(kv=>f(kv[0], kv[1])));
